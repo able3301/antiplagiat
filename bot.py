@@ -528,15 +528,15 @@ def start_keyboard() -> InlineKeyboardMarkup:
                 callback_data="question:Antiplagiat login/parol muammosi",
             )],
             [InlineKeyboardButton(
-                text="4️⃣ Parolni tiklashda kod kelmayapti",
+                text="3️⃣Parolni tiklashda kod kelmayapti",
                 callback_data="question:Parolni tiklashda kod kelmayapti",
             )],
             [InlineKeyboardButton(
-                text="5️⃣ Sertifikatda boshqa ism chiqdi",
+                text="4️⃣Sertifikatda boshqa ism chiqdi",
                 callback_data="question:Sertifikatda noto'g'ri ism",
             )],
             [InlineKeyboardButton(
-                text="7️⃣ Natija hisoblanmoqda deb turibdi",
+                text="5️⃣Natija hisoblanmoqda deb turibdi",
                 callback_data="question:Natija uzoq hisoblanmoqda",
             )],
             [InlineKeyboardButton(
@@ -551,11 +551,11 @@ def question_menu_text() -> str:
     return (
         "Assalomu alaykum! 👋\n\n"
         "Muammoingizga mos bo‘limni tanlang:\n\n"
-        "1️⃣ Tasdiqlash tugmasi bosilmayapti\n"
-        "2️⃣ Antiplagiat: login yoki parol xato\n"
-        "3️⃣ Parolni tiklashda kod kelmayapti\n"
-        "4️⃣ Sertifikatda boshqa ism chiqdi\n"
-        "5️⃣ Natija hisoblanmoqda deb turibdi\n"
+        "1️⃣ Tasdiqlash tugmasi bosilmayapti\n\n"
+        "2️⃣ Antiplagiat: login yoki parol xato\n\n"
+        "3️⃣ Parolni tiklashda kod kelmayapti\n\n"
+        "4️⃣ Sertifikatda boshqa ism chiqdi\n\n"
+        "5️⃣ Natija hisoblanmoqda deb turibdi\n\n"
         "🆕 Boshqa turdagi so'rov\n\n"
         "Quyidagi tugmalardan birini bosing 👇"
     )
