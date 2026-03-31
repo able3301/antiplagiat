@@ -384,7 +384,7 @@ def append_text_to_ticket(existing_text: str, message: Message) -> str:
     return (
         existing_text
         + "\n\n"
-        + f"📨 <b>Qo‘shimcha xabar ({msg_time})</b>\n"
+        + f"📨 <b>Qo'shimcha xabar ({msg_time})</b>\n"
         + f"{added_text}"
     )
 
@@ -442,7 +442,7 @@ def start_keyboard() -> InlineKeyboardMarkup:
 def question_menu_text() -> str:
     return (
         "Assalomu alaykum! 👋\n\n"
-        "Quyidagi bo‘limlardan birini tanlang.\n"
+        "Quyidagi bo'limlardan birini tanlang.\n"
         "Savol turini tanlaganingizdan keyin xabaringizni yuboring."
     )
 
@@ -456,7 +456,7 @@ def build_sender_card(message: Message, question_type: Optional[str]) -> str:
 
     return (
         "📩 <b>Yangi murojaat</b>\n"
-        f"🗂 <b>Bo‘lim:</b> {q_type}\n"
+        f"🗂 <b>Bo'lim:</b> {q_type}\n"
         f"👤 <b>F.I.Sh.:</b> {full_name}\n"
         f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
         f"🔗 <b>Username:</b> {username}\n\n"
@@ -474,13 +474,14 @@ def build_full_text_message(message: Message, question_type: Optional[str]) -> s
 
     return (
         "📩 <b>Yangi murojaat</b>\n"
-        f"🗂 <b>Bo‘lim:</b> {q_type}\n"
+        f"🗂 <b>Bo'lim:</b> {q_type}\n"
         f"👤 <b>F.I.Sh.:</b> {full_name}\n"
         f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
         f"🔗 <b>Username:</b> {username}\n\n"
         f"💬 <b>Xabar:</b>\n{user_text}\n\n"
         "Quyidagi xabarga <b>reply</b> qilib javob bering."
     )
+
 
 def build_group_message_link(group_chat_id: int, message_id: int) -> str:
     chat_id_str = str(group_chat_id)
@@ -490,8 +491,9 @@ def build_group_message_link(group_chat_id: int, message_id: int) -> str:
             "Ticket link faqat supergroup uchun ishlaydi. TARGET_GROUP_ID -100 bilan boshlanishi kerak."
         )
 
-    internal_chat_id = chat_id_str[4:]  # "-100" ni olib tashlaymiz
+    internal_chat_id = chat_id_str[4:]
     return f"https://t.me/c/{internal_chat_id}/{message_id}"
+
 
 async def safe_set_reaction(bot: Bot, chat_id: int, message_id: int, emoji: str) -> None:
     try:
@@ -618,7 +620,7 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
                     question_type=question_type,
                 )
 
-                await message.answer("✅ Xabaringiz avvalgi murojaatga qo‘shildi.")
+                await message.answer("✅ Xabaringiz avvalgi murojaatga qo'shildi.")
                 return
 
             if message.voice or message.document:
@@ -647,7 +649,7 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
                     question_type=question_type,
                 )
 
-                await message.answer("✅ Xabaringiz avvalgi murojaatga qo‘shib yuborildi.")
+                await message.answer("✅ Xabaringiz avvalgi murojaatga qo'shib yuborildi.")
                 return
 
         # Yangi ticket ochish
@@ -741,7 +743,7 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
 
         await message.answer(
             "✅ Murojaatingiz qabul qilindi.\n"
-            "Javob tayyor bo‘lgach shu bot orqali sizga yuboriladi.",
+            "Javob tayyor bo'lgach shu bot orqali sizga yuboriladi.",
             reply_markup=start_keyboard(),
         )
 
@@ -756,8 +758,8 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
 # =========================
 # ADMIN FLOW
 # =========================
-@router.message(Command("tickets"))
-async def cmd_tickets(message: Message) -> None:
+async def _handle_tickets(message: Message) -> None:
+    """Tickets ro'yxatini ko'rsatish — guruh va private uchun umumiy logika."""
     user = message.from_user
     if not user or not is_admin(user.id):
         await message.answer("⛔ Siz admin emassiz.")
@@ -766,10 +768,10 @@ async def cmd_tickets(message: Message) -> None:
     tickets = get_open_tickets(limit=20)
 
     if not tickets:
-        await message.answer("✅ Hozircha ochiq murojaatlar yo‘q.")
+        await message.answer("✅ Hozircha ochiq murojaatlar yo'q.")
         return
 
-    lines = ["📋 <b>Ochiq murojaatlar ro‘yxati</b>\n"]
+    lines = ["📋 <b>Ochiq murojaatlar ro'yxati</b>\n"]
     keyboard_rows = []
 
     for idx, ticket in enumerate(tickets, start=1):
@@ -785,7 +787,7 @@ async def cmd_tickets(message: Message) -> None:
             f"👤 {full_name}\n"
             f"🔗 {username_text}\n"
             f"🆔 User: <code>{user_chat_id}</code>\n"
-            f"🗂 Bo‘lim: {q_type}\n"
+            f"🗂 Bo'lim: {q_type}\n"
         )
 
         try:
@@ -806,8 +808,8 @@ async def cmd_tickets(message: Message) -> None:
     extra_note = ""
     if not keyboard_rows:
         extra_note = (
-            "\n⚠️ Ticket link yaratib bo‘lmadi.\n"
-            "Buning uchun guruh supergroup bo‘lishi va ID -100 bilan boshlanishi kerak."
+            "\n⚠️ Ticket link yaratib bo'lmadi.\n"
+            "Buning uchun guruh supergroup bo'lishi va ID -100 bilan boshlanishi kerak."
         )
 
     await message.answer(
@@ -816,6 +818,19 @@ async def cmd_tickets(message: Message) -> None:
         reply_markup=keyboard,
         disable_web_page_preview=True,
     )
+
+
+# ⚠️ MUHIM: Bu handler from_group_to_user va ignore_non_replies DAN OLDIN ro'yxatdan o'tishi shart!
+@router.message(F.chat.id == TARGET_GROUP_ID, Command("tickets"))
+async def cmd_tickets_in_group(message: Message) -> None:
+    """Guruh ichida /tickets komandasi — ignore_non_replies dan oldin turishi shart."""
+    await _handle_tickets(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, Command("tickets"))
+async def cmd_tickets_private(message: Message) -> None:
+    """Private chatda /tickets komandasi."""
+    await _handle_tickets(message)
 
 
 @router.message(F.chat.id == TARGET_GROUP_ID, F.reply_to_message.as_("reply_to"))
@@ -831,7 +846,7 @@ async def from_group_to_user(message: Message, bot: Bot, reply_to: Message) -> N
         return
 
     if ADMIN_USER_IDS and admin.id not in ADMIN_USER_IDS:
-        await message.reply("⛔ Siz admin ro‘yxatida yo‘qsiz.")
+        await message.reply("⛔ Siz admin ro'yxatida yo'qsiz.")
         return
 
     ticket_message_id = link["ticket_message_id"]
@@ -868,7 +883,7 @@ async def from_group_to_user(message: Message, bot: Bot, reply_to: Message) -> N
     except Exception as exc:
         logger.exception("Javobni foydalanuvchiga yuborishda xatolik: %s", exc)
         await message.reply(
-            "❌ Javobni yuborib bo‘lmadi. Foydalanuvchi botni bloklagan bo‘lishi mumkin."
+            "❌ Javobni yuborib bo'lmadi. Foydalanuvchi botni bloklagan bo'lishi mumkin."
         )
 
 
