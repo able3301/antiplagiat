@@ -478,24 +478,34 @@ def is_allowed_user_content(message: Message) -> bool:
 def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="1️⃣ Tasdiqlash tugmasi bosilmayapti",
-                    callback_data="question:Metodik ish tasdiqlash muammosi",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="2️⃣ Antiplagiat: login yoki parol xato",
-                    callback_data="question:Antiplagiat login/parol muammosi",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="3️⃣ Boshqa qurilmadan kirilgan deyapti",
-                    callback_data="question:Boshqa qurilmadan kirish muammosi",
-                )
-            ],
+            [InlineKeyboardButton(
+                text="1️⃣ Tasdiqlash tugmasi bosilmayapti",
+                callback_data="question:Metodik ish tasdiqlash muammosi",
+            )],
+            [InlineKeyboardButton(
+                text="2️⃣ Antiplagiat: login yoki parol xato",
+                callback_data="question:Antiplagiat login/parol muammosi",
+            )],
+            [InlineKeyboardButton(
+                text="3️⃣ Boshqa qurilmadan kirilgan deyapti",
+                callback_data="question:Boshqa qurilmadan kirish muammosi",
+            )],
+            [InlineKeyboardButton(
+                text="4️⃣ Parolni tiklashda kod kelmayapti",
+                callback_data="question:Parolni tiklashda kod kelmayapti",
+            )],
+            [InlineKeyboardButton(
+                text="5️⃣ Sertifikatda boshqa ism chiqdi",
+                callback_data="question:Sertifikatda noto'g'ri ism",
+            )],
+            [InlineKeyboardButton(
+                text="6️⃣ Ariza yuborishda 400 xato",
+                callback_data="question:Ariza yuborishda 400 xato",
+            )],
+            [InlineKeyboardButton(
+                text="7️⃣ Natija hisoblanmoqda deb turibdi",
+                callback_data="question:Natija uzoq hisoblanmoqda",
+            )],
         ]
     )
 
@@ -503,10 +513,14 @@ def start_keyboard() -> InlineKeyboardMarkup:
 def question_menu_text() -> str:
     return (
         "Assalomu alaykum! 👋\n\n"
-        "Muammoingizga mos bo'limni tanlang:\n\n"
-        "1️⃣ Metodik ishimni kiritdim, tasdiqlash tugmasi bosilmayapti\n"
-        "2️⃣ Antiplagiatdan ro'yxatdan o'tganman, parol yoki login xato deyapti\n"
-        "3️⃣ Saytga login/parolimni kiritdim, boshqa qurilmadan kirilgan deb chiqyapti\n\n"
+        "Muammoingizga mos bo\u2019limni tanlang:\n\n"
+        "1️⃣ Tasdiqlash tugmasi bosilmayapti\n"
+        "2️⃣ Antiplagiat: login yoki parol xato\n"
+        "3️⃣ Boshqa qurilmadan kirilgan deyapti\n"
+        "4️⃣ Parolni tiklashda kod kelmayapti\n"
+        "5️⃣ Sertifikatda boshqa ism chiqdi\n"
+        "6️⃣ Ariza yuborishda 400 xato\n"
+        "7️⃣ Natija hisoblanmoqda deb turibdi\n\n"
         "Quyidagi tugmalardan birini bosing 👇"
     )
 
@@ -587,29 +601,58 @@ async def mark_ticket(bot: Bot, chat_id: int, ticket_message_id: int, emoji: str
 # =========================
 AUTO_ANSWERS: dict[str, str] = {
     "Metodik ish tasdiqlash muammosi": (
-        "📋 <b>Metodik ish tasdiqlash bo\u2019yicha yo\u2019riqnoma:</b>\n\n"
-        "1\ufe0f\u20e3 Shaxsiy kabinetingizga kiring\n"
-        "2\ufe0f\u20e3 <b>Metodik ish</b> bo\u2019limini oching\n"
-        "3\ufe0f\u20e3 Faylni yuklang va <b>Yuborish</b> tugmasini bosing\n"
-        "4\ufe0f\u20e3 Sahifa yangilanganidan keyin <b>Tasdiqlash</b> tugmasi faollashadi\n\n"
-        "\U0001f4a1 Agar muammo davom etsa, brauzer keshini tozalab qayta urinib ko\u2019ring."
+        "📋 <b>Tasdiqlash tugmasi bosilmayotgan bo\u2019lsa:</b>\n\n"
+        "1️⃣ Sahifani pastga aylantiring va <b>Ommaviy oferta shartlari</b> bo\u2019limini toping\n"
+        "2️⃣ Eng pastdagi <b>\"Ommaviy oferta shartlariga roziman\"</b> tugmasini bosing\n"
+        "3️⃣ Tugma ko\u2019rinmasa, sahifani kichraytiring (<b>Ctrl + sichqoncha g\u2019ildiragi</b>)\n\n"
+        "💡 Shundan so\u2019ng tasdiqlash tugmasi faollashadi."
     ),
     "Antiplagiat login/parol muammosi": (
-        "\U0001f510 <b>Antiplagiat tizimiga kirish yo\u2019riqnomasi:</b>\n\n"
-        "1\ufe0f\u20e3 <b>Login</b> \u2014 bu sizning elektron pochta manzilingiz\n"
-        "2\ufe0f\u20e3 Parolni unutgan bo\u2019lsangiz, <b>Parolni tiklash</b> tugmasini bosing\n"
-        "3\ufe0f\u20e3 Pochta manzilingizga kelgan havoladan yangi parol o\u2019rnating\n\n"
-        "\U0001f4a1 Agar elektron pochtangizga kirish imkoningiz bo\u2019lmasa, quyida Savol yuborish tugmasini bosing."
+        "🔐 <b>Login yoki parol xato bo\u2019lsa:</b>\n\n"
+        "<b>Parolni unutgan bo\u2019lsangiz:</b>\n"
+        "1️⃣ <b>\"Parolni unutdingizmi?\"</b> tugmasini bosing\n"
+        "2️⃣ Telegram bot orqali a\u2019zo bo\u2019lish tugmasini bosing\n"
+        "3️⃣ Botga <b>/start</b> yuboring va telefon raqamingizni ulashing\n"
+        "4️⃣ Saytda raqamingizni kiriting va <b>Telegramga kod yuborish</b> tugmasini bosing\n"
+        "5️⃣ Telegramga kelgan 6 xonali kodni saytga kiriting va yangi parol o\u2019rnating\n\n"
+        "<b>Loginni unutgan bo\u2019lsangiz:</b>\n"
+        "💡 Saytda ro\u2019yxatdan o\u2019tishda kiritgan <b>username</b> sizning loginingiz hisoblanadi.\n"
+        "Eslay olmasangiz, texnik mutaxassisga murojaat qiling."
     ),
     "Boshqa qurilmadan kirish muammosi": (
-        "\U0001f512 <b>Boshqa qurilmadan kirish xatosi:</b>\n\n"
-        "Bu xabar xavfsizlik tizimi tomonidan chiqariladi.\n\n"
-        "1\ufe0f\u20e3 <b>Chiqish</b> tugmasini bosib, qayta kiring\n"
-        "2\ufe0f\u20e3 Parolingizni o\u2019zgartiring\n"
-        "3\ufe0f\u20e3 Faqat bir qurilmadan foydalaning\n\n"
-        "\U0001f4a1 Agar muammo hal bo\u2019lmasa, quyida Savol yuborish tugmasini bosing."
+        "🔒 <b>Boshqa qurilmadan kirilgan xabari chiqsa:</b>\n\n"
+        "1️⃣ Login va parolingizni kiriting\n"
+        "2️⃣ <b>\"Kirish\"</b> tugmasi o\u2019rniga <b>qizil</b> rangdagi <b>\"Barcha qurilmalardan chiqib kirish\"</b> tugmasini bosing\n\n"
+        "⚠️ Muhim: tugmani bosish paytida login va parolingiz kiritilgan holda bo\u2019lsin."
+    ),
+    "Parolni tiklashda kod kelmayapti": (
+        "📱 <b>Telegram orqali kod kelmayotgan bo\u2019lsa:</b>\n\n"
+        "1️⃣ Telegramda botga <b>/start</b> yozing\n"
+        "2️⃣ Telefon raqamingizni qayta ulashing\n"
+        "3️⃣ Saytga qaytib, raqamingizni kiriting va <b>Telegramga kod yuborish</b> tugmasini bosing\n\n"
+        "💡 Agar avval botga a\u2019zo bo\u2019lgan bo\u2019lsangiz, saytda o\u2019sha raqamni kiritib to\u2019g\u2019ridan-to\u2019g\u2019ri kod so\u2019rang."
+    ),
+    "Sertifikatda noto'g'ri ism": (
+        "📜 <b>Sertifikatda boshqa ism chiqsa:</b>\n\n"
+        "Sertifikat har doim <b>ro\u2019yxatdan o\u2019tgan foydalanuvchi nomiga</b> chiqariladi.\n\n"
+        "Agar boshqa o\u2019qituvchining ishi sizning accountingiz orqali yuborilgan bo\u2019lsa, ismni o\u2019zgartirib bo\u2019lmaydi.\n\n"
+        "💡 Yechim: o\u2019sha o\u2019qituvchi <b>o\u2019z nomidan yangi account ochib</b>, metodik ishini o\u2019zi yuborishi kerak."
+    ),
+    "Ariza yuborishda 400 xato": (
+        "⚠️ <b>Ariza yuborishda 400 xato chiqsa:</b>\n\n"
+        "Bu xato ko\u2019pincha <b>fayl nomi juda uzun</b> bo\u2019lganda yuzaga keladi.\n\n"
+        "1️⃣ Yuklayotgan faylning nomini <b>qisqartiring</b> (masalan: <b>ish.docx</b>)\n"
+        "2️⃣ Faylni qayta yuklang va arizani qayta yuboring\n\n"
+        "💡 Fayl nomida maxsus belgilar yoki bo\u2019sh joylar ham muammo qo\u2019yishi mumkin."
+    ),
+    "Natija uzoq hisoblanmoqda": (
+        "⏳ <b>Natija uzoq vaqt hisoblanmoqda bo\u2019lsa:</b>\n\n"
+        "Tizimda foydalanuvchilar soni ko\u2019p bo\u2019lganda navbat hosil bo\u2019lishi mumkin.\n\n"
+        "✅ Xavotir olmang \u2014 balansingiz yechilmaydi va natijangiz albatta chiqadi.\n\n"
+        "💡 Biroz kutib, sahifani yangilang. Muammo davom etsa, quyida savol yuboring."
     ),
 }
+
 
 def auto_answer_keyboard(question_type: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
