@@ -429,11 +429,22 @@ def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="1-savol: Metodik ishimni kiritdim tasdiqlash tugmasi bosilmayapti", callback_data="question:1-savol"),
-                InlineKeyboardButton(text="2-savol: Antiplagiatdan ro’yxatdan o’tganman parol yoki login xató deyapti", callback_data="question:2-savol"),
+                InlineKeyboardButton(
+                    text="1️⃣ Metodik ishimni kiritdim, tasdiqlash tugmasi bosilmayapti",
+                    callback_data="question:Metodik ish tasdiqlash muammosi",
+                )
             ],
             [
-                InlineKeyboardButton(text="Savollar", callback_data="show_questions")
+                InlineKeyboardButton(
+                    text="2️⃣ Antiplagiatdan ro'yxatdan o'tganman, parol yoki login xato deyapti",
+                    callback_data="question:Antiplagiat login/parol muammosi",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="3️⃣ Saytga login/parol kiritdim, boshqa qurilmadan kirilgan deb chiqyapti",
+                    callback_data="question:Boshqa qurilmadan kirish muammosi",
+                )
             ],
         ]
     )
@@ -442,7 +453,7 @@ def start_keyboard() -> InlineKeyboardMarkup:
 def question_menu_text() -> str:
     return (
         "Assalomu alaykum! 👋\n\n"
-        "Quyidagi bo'limlardan birini tanlang.\n"
+        "Muammoingizga mos bo'limni tanlang:\n"
         "Savol turini tanlaganingizdan keyin xabaringizni yuboring."
     )
 
