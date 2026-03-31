@@ -26,7 +26,7 @@ DB_PATH = BASE_DIR / "bridge.db"
 
 BOT_TOKEN = "8692288654:AAGQgjLeZyVveHjt0ysyjtnYwquSyK1L8uY"
 TARGET_GROUP_ID_RAW = "-1003312509381"
-ADMIN_USER_IDS_RAW = "1350513135,957193784,1028767008"
+ADMIN_USER_IDS_RAW = ""
 
 CLAIM_REACTION = "👍"
 DONE_REACTION = "👍"
@@ -760,11 +760,6 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
 # =========================
 async def _handle_tickets(message: Message) -> None:
     """Tickets ro'yxatini ko'rsatish — guruh va private uchun umumiy logika."""
-    user = message.from_user
-    if not user or not is_admin(user.id):
-        await message.answer("⛔ Siz admin emassiz.")
-        return
-
     tickets = get_open_tickets(limit=20)
 
     if not tickets:
@@ -843,10 +838,6 @@ async def from_group_to_user(message: Message, bot: Bot, reply_to: Message) -> N
     admin = message.from_user
     if not admin:
         await message.reply("❌ Operator ma'lumotini aniqlab bo'lmadi.")
-        return
-
-    if ADMIN_USER_IDS and admin.id not in ADMIN_USER_IDS:
-        await message.reply("⛔ Siz admin ro'yxatida yo'qsiz.")
         return
 
     ticket_message_id = link["ticket_message_id"]
