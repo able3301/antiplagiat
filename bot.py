@@ -414,6 +414,56 @@ def get_open_tickets(limit: int = 20) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def get_stats() -> dict:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        # Ochiq ticketlar soni
+        open_count = conn.execute(
+            "SELECT COUNT(*) FROM user_open_tickets WHERE status = 'open'"
+        ).fetchone()[0]
+
+        # Yopiq ticketlar soni
+        closed_count = conn.execute(
+            "SELECT COUNT(*) FROM user_open_tickets WHERE status = 'closed'"
+        ).fetchone()[0]
+
+        # Jami ticketlar
+        total_count = open_count + closed_count
+
+        # Bugun ochilgan ticketlar
+        today_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM user_open_tickets
+            WHERE DATE(created_at) = DATE('now')
+            """
+        ).fetchone()[0]
+
+        # Eng ko'p murojaat qilingan bo'limlar (top 3)
+        top_sections = conn.execute(
+            """
+            SELECT question_type, COUNT(*) as cnt
+            FROM user_open_tickets
+            WHERE question_type IS NOT NULL
+            GROUP BY question_type
+            ORDER BY cnt DESC
+            LIMIT 3
+            """
+        ).fetchall()
+
+        # Javob berilgan (claim qilingan) ticketlar soni
+        claimed_count = conn.execute(
+            "SELECT COUNT(*) FROM ticket_claims"
+        ).fetchone()[0]
+
+        return {
+            "open": open_count,
+            "closed": closed_count,
+            "total": total_count,
+            "today": today_count,
+            "claimed": claimed_count,
+            "top_sections": [(row[0], row[1]) for row in top_sections],
+        }
+
+
 # =========================
 # HELPERS
 # =========================
@@ -531,6 +581,54 @@ async def mark_ticket(bot: Bot, chat_id: int, ticket_message_id: int, emoji: str
         await safe_set_reaction(bot, chat_id, message_id, emoji)
 
 
+
+# =========================
+# AVTOMATIK JAVOBLAR
+# =========================
+AUTO_ANSWERS: dict[str, str] = {
+    "Metodik ish tasdiqlash muammosi": (
+        "📋 <b>Metodik ish tasdiqlash bo\u2019yicha yo\u2019riqnoma:</b>\n\n"
+        "1\ufe0f\u20e3 Shaxsiy kabinetingizga kiring\n"
+        "2\ufe0f\u20e3 <b>Metodik ish</b> bo\u2019limini oching\n"
+        "3\ufe0f\u20e3 Faylni yuklang va <b>Yuborish</b> tugmasini bosing\n"
+        "4\ufe0f\u20e3 Sahifa yangilanganidan keyin <b>Tasdiqlash</b> tugmasi faollashadi\n\n"
+        "\U0001f4a1 Agar muammo davom etsa, brauzer keshini tozalab qayta urinib ko\u2019ring."
+    ),
+    "Antiplagiat login/parol muammosi": (
+        "\U0001f510 <b>Antiplagiat tizimiga kirish yo\u2019riqnomasi:</b>\n\n"
+        "1\ufe0f\u20e3 <b>Login</b> \u2014 bu sizning elektron pochta manzilingiz\n"
+        "2\ufe0f\u20e3 Parolni unutgan bo\u2019lsangiz, <b>Parolni tiklash</b> tugmasini bosing\n"
+        "3\ufe0f\u20e3 Pochta manzilingizga kelgan havoladan yangi parol o\u2019rnating\n\n"
+        "\U0001f4a1 Agar elektron pochtangizga kirish imkoningiz bo\u2019lmasa, quyida Savol yuborish tugmasini bosing."
+    ),
+    "Boshqa qurilmadan kirish muammosi": (
+        "\U0001f512 <b>Boshqa qurilmadan kirish xatosi:</b>\n\n"
+        "Bu xabar xavfsizlik tizimi tomonidan chiqariladi.\n\n"
+        "1\ufe0f\u20e3 <b>Chiqish</b> tugmasini bosib, qayta kiring\n"
+        "2\ufe0f\u20e3 Parolingizni o\u2019zgartiring\n"
+        "3\ufe0f\u20e3 Faqat bir qurilmadan foydalaning\n\n"
+        "\U0001f4a1 Agar muammo hal bo\u2019lmasa, quyida Savol yuborish tugmasini bosing."
+    ),
+}
+
+def auto_answer_keyboard(question_type: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Muammo hal bo\'ldi",
+                    callback_data=f"resolved:{question_type}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❓ Savol yuborish",
+                    callback_data=f"ask:{question_type}",
+                )
+            ],
+        ]
+    )
+
 # =========================
 # USER FLOW
 # =========================
@@ -558,13 +656,58 @@ async def choose_question(callback: CallbackQuery) -> None:
 
     set_user_selected_question(user_chat_id, question_type)
 
-    await callback.message.edit_text(
-        f"✅ Siz <b>{question_type}</b> ni tanladingiz.\n\n"
-        "Endi savolingizni yozing yoki ovoz/fayl yuboring.",
-        parse_mode=ParseMode.HTML,
-        reply_markup=start_keyboard(),
-    )
+    auto_text = AUTO_ANSWERS.get(question_type)
+
+    if auto_text:
+        await callback.message.edit_text(
+            f"🗂 <b>{question_type}</b>\n\n"
+            + auto_text
+            + "\n\n"
+            "─────────────────\n"
+            "Ushbu javob muammoingizni hal qildimi?",
+            parse_mode=ParseMode.HTML,
+            reply_markup=auto_answer_keyboard(question_type),
+        )
+    else:
+        await callback.message.edit_text(
+            f"✅ Siz <b>{question_type}</b> ni tanladingiz.\n\n"
+            "Endi savolingizni yozing yoki ovoz/fayl yuboring.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=start_keyboard(),
+        )
     await callback.answer("Savol turi tanlandi")
+
+
+@router.callback_query(F.data.startswith("resolved:"))
+async def ticket_resolved(callback: CallbackQuery) -> None:
+    """Foydalanuvchi muammo hal bo'ldi deb belgiladi."""
+    user_chat_id = callback.from_user.id
+    clear_user_selected_question(user_chat_id)
+    close_user_ticket(user_chat_id)
+
+    await callback.message.edit_text(
+        "✅ <b>Ajoyib!</b> Muammoingiz hal bo'lganidan xursandmiz.\n\n"
+        "Boshqa savollaringiz bo'lsa, /start ni bosing.",
+        parse_mode=ParseMode.HTML,
+    )
+    await callback.answer("Yopildi")
+
+
+@router.callback_query(F.data.startswith("ask:"))
+async def ask_question(callback: CallbackQuery) -> None:
+    """Foydalanuvchi savol yubormoqchi — xabar yozishga yo'naltiradi."""
+    question_type = callback.data.split(":", 1)[1]
+    user_chat_id = callback.from_user.id
+
+    set_user_selected_question(user_chat_id, question_type)
+
+    await callback.message.edit_text(
+        f"📝 <b>{question_type}</b>\n\n"
+        "Savolingizni yozing yoki ovozli xabar / fayl yuboring.\n"
+        "Xabaringiz mutaxassislarimizga yuboriladi.",
+        parse_mode=ParseMode.HTML,
+    )
+    await callback.answer("Savol yuborish rejimi")
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, Command("menu"))
@@ -829,7 +972,44 @@ async def _handle_tickets(message: Message) -> None:
     )
 
 
+async def _handle_stats(message: Message) -> None:
+    """Statistika ko'rsatish — guruh va private uchun umumiy logika."""
+    stats = get_stats()
+
+    top_lines = ""
+    for i, (section, cnt) in enumerate(stats["top_sections"], start=1):
+        top_lines += f"  {i}. {section} — <b>{cnt} ta</b>\n"
+
+    if not top_lines:
+        top_lines = "  Ma'lumot yo'q\n"
+
+    text = (
+        "📊 <b>Statistika</b>\n\n"
+        f"📂 Jami murojaatlar: <b>{stats['total']} ta</b>\n"
+        f"🟢 Ochiq: <b>{stats['open']} ta</b>\n"
+        f"✅ Yopiq: <b>{stats['closed']} ta</b>\n"
+        f"📅 Bugun: <b>{stats['today']} ta</b>\n"
+        f"👨‍💼 Javob berilgan: <b>{stats['claimed']} ta</b>\n\n"
+        f"🏆 <b>Eng ko'p murojaat:</b>\n"
+        + top_lines
+    )
+
+    await message.answer(text, parse_mode="HTML")
+
+
 # ⚠️ MUHIM: Bu handler from_group_to_user va ignore_non_replies DAN OLDIN ro'yxatdan o'tishi shart!
+@router.message(F.chat.id == TARGET_GROUP_ID, Command("stats"))
+async def cmd_stats_in_group(message: Message) -> None:
+    """Guruhda /stats komandasi."""
+    await _handle_stats(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, Command("stats"))
+async def cmd_stats_private(message: Message) -> None:
+    """Private chatda /stats komandasi."""
+    await _handle_stats(message)
+
+
 @router.message(F.chat.id == TARGET_GROUP_ID, Command("tickets"))
 async def cmd_tickets_in_group(message: Message) -> None:
     """Guruh ichida /tickets komandasi — ignore_non_replies dan oldin turishi shart."""
