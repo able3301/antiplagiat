@@ -143,6 +143,19 @@ def init_db() -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ticket_responses (
+                group_chat_id INTEGER NOT NULL,
+                ticket_message_id INTEGER NOT NULL,
+                admin_user_id INTEGER NOT NULL,
+                admin_full_name TEXT NOT NULL,
+                responded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (group_chat_id, ticket_message_id)
+            )
+            """
+        )
+
         conn.commit()
 
 
@@ -291,6 +304,28 @@ def claim_ticket(
         return cursor.rowcount > 0
 
 
+def save_ticket_response(
+    group_chat_id: int,
+    ticket_message_id: int,
+    admin_user_id: int,
+    admin_full_name: str,
+) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO ticket_responses (
+                group_chat_id,
+                ticket_message_id,
+                admin_user_id,
+                admin_full_name,
+                responded_at
+            ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (group_chat_id, ticket_message_id, admin_user_id, admin_full_name),
+        )
+        conn.commit()
+
+
 def get_open_ticket_for_user(user_chat_id: int) -> Optional[dict]:
     with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
@@ -416,51 +451,57 @@ def get_open_tickets(limit: int = 20) -> list[dict]:
 
 def get_stats() -> dict:
     with closing(sqlite3.connect(DB_PATH)) as conn:
-        # Ochiq ticketlar soni
         open_count = conn.execute(
             "SELECT COUNT(*) FROM user_open_tickets WHERE status = 'open'"
         ).fetchone()[0]
 
-        # Yopiq ticketlar soni
         closed_count = conn.execute(
             "SELECT COUNT(*) FROM user_open_tickets WHERE status = 'closed'"
         ).fetchone()[0]
 
-        # Jami ticketlar
         total_count = open_count + closed_count
 
-        # Bugun ochilgan ticketlar
         today_count = conn.execute(
             """
             SELECT COUNT(*) FROM user_open_tickets
-            WHERE DATE(created_at) = DATE('now')
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
             """
         ).fetchone()[0]
 
-        # Eng ko'p murojaat qilingan bo'limlar (top 3)
         top_sections = conn.execute(
             """
             SELECT question_type, COUNT(*) as cnt
             FROM user_open_tickets
             WHERE question_type IS NOT NULL
+              AND TRIM(question_type) != ''
             GROUP BY question_type
             ORDER BY cnt DESC
             LIMIT 3
             """
         ).fetchall()
 
-        # Javob berilgan (claim qilingan) ticketlar soni
-        claimed_count = conn.execute(
-            "SELECT COUNT(*) FROM ticket_claims"
+        answered_count = conn.execute(
+            "SELECT COUNT(*) FROM ticket_responses"
         ).fetchone()[0]
+
+        admin_today_rows = conn.execute(
+            """
+            SELECT admin_full_name, COUNT(*) as cnt
+            FROM ticket_responses
+            WHERE DATE(responded_at, 'localtime') = DATE('now', 'localtime')
+            GROUP BY admin_user_id, admin_full_name
+            ORDER BY cnt DESC, admin_full_name ASC
+            """
+        ).fetchall()
 
         return {
             "open": open_count,
             "closed": closed_count,
             "total": total_count,
             "today": today_count,
-            "claimed": claimed_count,
+            "answered": answered_count,
             "top_sections": [(row[0], row[1]) for row in top_sections],
+            "admin_today": [(row[0], row[1]) for row in admin_today_rows],
         }
 
 
@@ -487,10 +528,6 @@ def start_keyboard() -> InlineKeyboardMarkup:
                 callback_data="question:Antiplagiat login/parol muammosi",
             )],
             [InlineKeyboardButton(
-                text="3️⃣ Boshqa qurilmadan kirilgan deyapti",
-                callback_data="question:Boshqa qurilmadan kirish muammosi",
-            )],
-            [InlineKeyboardButton(
                 text="4️⃣ Parolni tiklashda kod kelmayapti",
                 callback_data="question:Parolni tiklashda kod kelmayapti",
             )],
@@ -499,12 +536,12 @@ def start_keyboard() -> InlineKeyboardMarkup:
                 callback_data="question:Sertifikatda noto'g'ri ism",
             )],
             [InlineKeyboardButton(
-                text="6️⃣ Ariza yuborishda 400 xato",
-                callback_data="question:Ariza yuborishda 400 xato",
-            )],
-            [InlineKeyboardButton(
                 text="7️⃣ Natija hisoblanmoqda deb turibdi",
                 callback_data="question:Natija uzoq hisoblanmoqda",
+            )],
+            [InlineKeyboardButton(
+                text="🆕 Boshqa turdagi so'rov",
+                callback_data="question:Boshqa turdagi so'rov",
             )],
         ]
     )
@@ -513,14 +550,13 @@ def start_keyboard() -> InlineKeyboardMarkup:
 def question_menu_text() -> str:
     return (
         "Assalomu alaykum! 👋\n\n"
-        "Muammoingizga mos bo\u2019limni tanlang:\n\n"
+        "Muammoingizga mos bo‘limni tanlang:\n\n"
         "1️⃣ Tasdiqlash tugmasi bosilmayapti\n"
         "2️⃣ Antiplagiat: login yoki parol xato\n"
-        "3️⃣ Boshqa qurilmadan kirilgan deyapti\n"
         "4️⃣ Parolni tiklashda kod kelmayapti\n"
         "5️⃣ Sertifikatda boshqa ism chiqdi\n"
-        "6️⃣ Ariza yuborishda 400 xato\n"
-        "7️⃣ Natija hisoblanmoqda deb turibdi\n\n"
+        "7️⃣ Natija hisoblanmoqda deb turibdi\n"
+        "🆕 Boshqa turdagi so'rov\n\n"
         "Quyidagi tugmalardan birini bosing 👇"
     )
 
@@ -595,60 +631,46 @@ async def mark_ticket(bot: Bot, chat_id: int, ticket_message_id: int, emoji: str
         await safe_set_reaction(bot, chat_id, message_id, emoji)
 
 
-
 # =========================
 # AVTOMATIK JAVOBLAR
 # =========================
 AUTO_ANSWERS: dict[str, str] = {
     "Metodik ish tasdiqlash muammosi": (
-        "📋 <b>Tasdiqlash tugmasi bosilmayotgan bo\u2019lsa:</b>\n\n"
-        "1️⃣ Sahifani pastga aylantiring va <b>Ommaviy oferta shartlari</b> bo\u2019limini toping\n"
+        "📋 <b>Tasdiqlash tugmasi bosilmayotgan bo‘lsa:</b>\n\n"
+        "1️⃣ Sahifani pastga aylantiring va <b>Ommaviy oferta shartlari</b> bo‘limini toping\n"
         "2️⃣ Eng pastdagi <b>\"Ommaviy oferta shartlariga roziman\"</b> tugmasini bosing\n"
-        "3️⃣ Tugma ko\u2019rinmasa, sahifani kichraytiring (<b>Ctrl + sichqoncha g\u2019ildiragi</b>)\n\n"
-        "💡 Shundan so\u2019ng tasdiqlash tugmasi faollashadi."
+        "3️⃣ Tugma ko‘rinmasa, sahifani kichraytiring (<b>Ctrl + sichqoncha g‘ildiragi</b>)\n\n"
+        "💡 Shundan so‘ng tasdiqlash tugmasi faollashadi."
     ),
     "Antiplagiat login/parol muammosi": (
-        "🔐 <b>Login yoki parol xato bo\u2019lsa:</b>\n\n"
-        "<b>Parolni unutgan bo\u2019lsangiz:</b>\n"
+        "🔐 <b>Login yoki parol xato bo‘lsa:</b>\n\n"
+        "<b>Parolni unutgan bo‘lsangiz:</b>\n"
         "1️⃣ <b>\"Parolni unutdingizmi?\"</b> tugmasini bosing\n"
-        "2️⃣ Telegram bot orqali a\u2019zo bo\u2019lish tugmasini bosing\n"
+        "2️⃣ Telegram bot orqali a’zo bo‘lish tugmasini bosing\n"
         "3️⃣ Botga <b>/start</b> yuboring va telefon raqamingizni ulashing\n"
         "4️⃣ Saytda raqamingizni kiriting va <b>Telegramga kod yuborish</b> tugmasini bosing\n"
-        "5️⃣ Telegramga kelgan 6 xonali kodni saytga kiriting va yangi parol o\u2019rnating\n\n"
-        "<b>Loginni unutgan bo\u2019lsangiz:</b>\n"
-        "💡 Saytda ro\u2019yxatdan o\u2019tishda kiritgan <b>username</b> sizning loginingiz hisoblanadi.\n"
+        "5️⃣ Telegramga kelgan 6 xonali kodni saytga kiriting va yangi parol o‘rnating\n\n"
+        "<b>Loginni unutgan bo‘lsangiz:</b>\n"
+        "💡 Saytda ro‘yxatdan o‘tishda kiritgan <b>username</b> sizning loginingiz hisoblanadi.\n"
         "Eslay olmasangiz, texnik mutaxassisga murojaat qiling."
     ),
-    "Boshqa qurilmadan kirish muammosi": (
-        "🔒 <b>Boshqa qurilmadan kirilgan xabari chiqsa:</b>\n\n"
-        "1️⃣ Login va parolingizni kiriting\n"
-        "2️⃣ <b>\"Kirish\"</b> tugmasi o\u2019rniga <b>qizil</b> rangdagi <b>\"Barcha qurilmalardan chiqib kirish\"</b> tugmasini bosing\n\n"
-        "⚠️ Muhim: tugmani bosish paytida login va parolingiz kiritilgan holda bo\u2019lsin."
-    ),
     "Parolni tiklashda kod kelmayapti": (
-        "📱 <b>Telegram orqali kod kelmayotgan bo\u2019lsa:</b>\n\n"
+        "📱 <b>Telegram orqali kod kelmayotgan bo‘lsa:</b>\n\n"
         "1️⃣ Telegramda botga <b>/start</b> yozing\n"
         "2️⃣ Telefon raqamingizni qayta ulashing\n"
         "3️⃣ Saytga qaytib, raqamingizni kiriting va <b>Telegramga kod yuborish</b> tugmasini bosing\n\n"
-        "💡 Agar avval botga a\u2019zo bo\u2019lgan bo\u2019lsangiz, saytda o\u2019sha raqamni kiritib to\u2019g\u2019ridan-to\u2019g\u2019ri kod so\u2019rang."
+        "💡 Agar avval botga a’zo bo‘lgan bo‘lsangiz, saytda o‘sha raqamni kiritib to‘g‘ridan-to‘g‘ri kod so‘rang."
     ),
     "Sertifikatda noto'g'ri ism": (
         "📜 <b>Sertifikatda boshqa ism chiqsa:</b>\n\n"
-        "Sertifikat har doim <b>ro\u2019yxatdan o\u2019tgan foydalanuvchi nomiga</b> chiqariladi.\n\n"
-        "Agar boshqa o\u2019qituvchining ishi sizning accountingiz orqali yuborilgan bo\u2019lsa, ismni o\u2019zgartirib bo\u2019lmaydi.\n\n"
-        "💡 Yechim: o\u2019sha o\u2019qituvchi <b>o\u2019z nomidan yangi account ochib</b>, metodik ishini o\u2019zi yuborishi kerak."
-    ),
-    "Ariza yuborishda 400 xato": (
-        "⚠️ <b>Ariza yuborishda 400 xato chiqsa:</b>\n\n"
-        "Bu xato ko\u2019pincha <b>fayl nomi juda uzun</b> bo\u2019lganda yuzaga keladi.\n\n"
-        "1️⃣ Yuklayotgan faylning nomini <b>qisqartiring</b> (masalan: <b>ish.docx</b>)\n"
-        "2️⃣ Faylni qayta yuklang va arizani qayta yuboring\n\n"
-        "💡 Fayl nomida maxsus belgilar yoki bo\u2019sh joylar ham muammo qo\u2019yishi mumkin."
+        "Sertifikat har doim <b>ro‘yxatdan o‘tgan foydalanuvchi nomiga</b> chiqariladi.\n\n"
+        "Agar boshqa o‘qituvchining ishi sizning accountingiz orqali yuborilgan bo‘lsa, ismni o‘zgartirib bo‘lmaydi.\n\n"
+        "💡 Yechim: o‘sha o‘qituvchi <b>o‘z nomidan yangi account ochib</b>, metodik ishini o‘zi yuborishi kerak."
     ),
     "Natija uzoq hisoblanmoqda": (
-        "⏳ <b>Natija uzoq vaqt hisoblanmoqda bo\u2019lsa:</b>\n\n"
-        "Tizimda foydalanuvchilar soni ko\u2019p bo\u2019lganda navbat hosil bo\u2019lishi mumkin.\n\n"
-        "✅ Xavotir olmang \u2014 balansingiz yechilmaydi va natijangiz albatta chiqadi.\n\n"
+        "⏳ <b>Natija uzoq vaqt hisoblanmoqda bo‘lsa:</b>\n\n"
+        "Tizimda foydalanuvchilar soni ko‘p bo‘lganda navbat hosil bo‘lishi mumkin.\n\n"
+        "✅ Xavotir olmang — balansingiz yechilmaydi va natijangiz albatta chiqadi.\n\n"
         "💡 Biroz kutib, sahifani yangilang. Muammo davom etsa, quyida savol yuboring."
     ),
 }
@@ -659,7 +681,7 @@ def auto_answer_keyboard(question_type: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Muammo hal bo\'ldi",
+                    text="✅ Muammo hal bo'ldi",
                     callback_data=f"resolved:{question_type}",
                 )
             ],
@@ -671,6 +693,7 @@ def auto_answer_keyboard(question_type: str) -> InlineKeyboardMarkup:
             ],
         ]
     )
+
 
 # =========================
 # USER FLOW
@@ -716,14 +739,12 @@ async def choose_question(callback: CallbackQuery) -> None:
             f"✅ Siz <b>{question_type}</b> ni tanladingiz.\n\n"
             "Endi savolingizni yozing yoki ovoz/fayl yuboring.",
             parse_mode=ParseMode.HTML,
-            reply_markup=start_keyboard(),
         )
     await callback.answer("Savol turi tanlandi")
 
 
 @router.callback_query(F.data.startswith("resolved:"))
 async def ticket_resolved(callback: CallbackQuery) -> None:
-    """Foydalanuvchi muammo hal bo'ldi deb belgiladi."""
     user_chat_id = callback.from_user.id
     clear_user_selected_question(user_chat_id)
     close_user_ticket(user_chat_id)
@@ -738,7 +759,6 @@ async def ticket_resolved(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("ask:"))
 async def ask_question(callback: CallbackQuery) -> None:
-    """Foydalanuvchi savol yubormoqchi — xabar yozishga yo'naltiradi."""
     question_type = callback.data.split(":", 1)[1]
     user_chat_id = callback.from_user.id
 
@@ -787,7 +807,6 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
             )
             return
 
-        # Ochiq ticket mavjud bo'lsa, shu ticketga qo'shamiz
         if open_ticket:
             ticket_message_id = open_ticket["ticket_message_id"]
             question_type = open_ticket.get("question_type") or selected_question
@@ -852,7 +871,6 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
                 await message.answer("✅ Xabaringiz avvalgi murojaatga qo'shib yuborildi.")
                 return
 
-        # Yangi ticket ochish
         question_type = selected_question
 
         if message.text:
@@ -959,7 +977,6 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
 # ADMIN FLOW
 # =========================
 async def _handle_tickets(message: Message) -> None:
-    """Tickets ro'yxatini ko'rsatish — guruh va private uchun umumiy logika."""
     tickets = get_open_tickets(limit=20)
 
     if not tickets:
@@ -1016,15 +1033,21 @@ async def _handle_tickets(message: Message) -> None:
 
 
 async def _handle_stats(message: Message) -> None:
-    """Statistika ko'rsatish — guruh va private uchun umumiy logika."""
     stats = get_stats()
 
+    admin_lines = ""
+    for admin_name, cnt in stats["admin_today"]:
+        admin_lines += f"{admin_name} -- <b>{cnt} ta</b>\n"
+
+    if not admin_lines:
+        admin_lines = "Ma'lumot yo'q\n"
+
     top_lines = ""
-    for i, (section, cnt) in enumerate(stats["top_sections"], start=1):
-        top_lines += f"  {i}. {section} — <b>{cnt} ta</b>\n"
+    for section, cnt in stats["top_sections"]:
+        top_lines += f"{section} — <b>{cnt} ta</b>\n"
 
     if not top_lines:
-        top_lines = "  Ma'lumot yo'q\n"
+        top_lines = "Ma'lumot yo'q\n"
 
     text = (
         "📊 <b>Statistika</b>\n\n"
@@ -1032,36 +1055,32 @@ async def _handle_stats(message: Message) -> None:
         f"🟢 Ochiq: <b>{stats['open']} ta</b>\n"
         f"✅ Yopiq: <b>{stats['closed']} ta</b>\n"
         f"📅 Bugun: <b>{stats['today']} ta</b>\n"
-        f"👨‍💼 Javob berilgan: <b>{stats['claimed']} ta</b>\n\n"
+        f"👨‍💼 Javob berilgan: <b>{stats['answered']} ta</b>\n"
+        f"{admin_lines}\n"
         f"🏆 <b>Eng ko'p murojaat:</b>\n"
-        + top_lines
+        f"{top_lines}"
     )
 
     await message.answer(text, parse_mode="HTML")
 
 
-# ⚠️ MUHIM: Bu handler from_group_to_user va ignore_non_replies DAN OLDIN ro'yxatdan o'tishi shart!
 @router.message(F.chat.id == TARGET_GROUP_ID, Command("stats"))
 async def cmd_stats_in_group(message: Message) -> None:
-    """Guruhda /stats komandasi."""
     await _handle_stats(message)
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, Command("stats"))
 async def cmd_stats_private(message: Message) -> None:
-    """Private chatda /stats komandasi."""
     await _handle_stats(message)
 
 
 @router.message(F.chat.id == TARGET_GROUP_ID, Command("tickets"))
 async def cmd_tickets_in_group(message: Message) -> None:
-    """Guruh ichida /tickets komandasi — ignore_non_replies dan oldin turishi shart."""
     await _handle_tickets(message)
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, Command("tickets"))
 async def cmd_tickets_private(message: Message) -> None:
-    """Private chatda /tickets komandasi."""
     await _handle_tickets(message)
 
 
@@ -1102,6 +1121,13 @@ async def from_group_to_user(message: Message, bot: Bot, reply_to: Message) -> N
             chat_id=link["user_chat_id"],
             from_chat_id=message.chat.id,
             message_id=message.message_id,
+        )
+
+        save_ticket_response(
+            group_chat_id=message.chat.id,
+            ticket_message_id=ticket_message_id,
+            admin_user_id=admin.id,
+            admin_full_name=admin.full_name,
         )
 
         close_user_ticket(link["user_chat_id"])
