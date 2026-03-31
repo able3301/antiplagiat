@@ -553,9 +553,9 @@ def question_menu_text() -> str:
         "Muammoingizga mos bo‘limni tanlang:\n\n"
         "1️⃣ Tasdiqlash tugmasi bosilmayapti\n"
         "2️⃣ Antiplagiat: login yoki parol xato\n"
-        "4️⃣ Parolni tiklashda kod kelmayapti\n"
-        "5️⃣ Sertifikatda boshqa ism chiqdi\n"
-        "7️⃣ Natija hisoblanmoqda deb turibdi\n"
+        "3️⃣ Parolni tiklashda kod kelmayapti\n"
+        "4️⃣ Sertifikatda boshqa ism chiqdi\n"
+        "5️⃣ Natija hisoblanmoqda deb turibdi\n"
         "🆕 Boshqa turdagi so'rov\n\n"
         "Quyidagi tugmalardan birini bosing 👇"
     )
