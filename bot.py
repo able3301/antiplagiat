@@ -430,19 +430,19 @@ def start_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="1️⃣ Metodik ishimni kiritdim, tasdiqlash tugmasi bosilmayapti",
+                    text="1️⃣ Tasdiqlash tugmasi bosilmayapti",
                     callback_data="question:Metodik ish tasdiqlash muammosi",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="2️⃣ Antiplagiatdan ro'yxatdan o'tganman, parol yoki login xato deyapti",
+                    text="2️⃣ Antiplagiat: login yoki parol xato",
                     callback_data="question:Antiplagiat login/parol muammosi",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="3️⃣ Saytga login/parol kiritdim, boshqa qurilmadan kirilgan deb chiqyapti",
+                    text="3️⃣ Boshqa qurilmadan kirilgan deyapti",
                     callback_data="question:Boshqa qurilmadan kirish muammosi",
                 )
             ],
@@ -453,8 +453,11 @@ def start_keyboard() -> InlineKeyboardMarkup:
 def question_menu_text() -> str:
     return (
         "Assalomu alaykum! 👋\n\n"
-        "Muammoingizga mos bo'limni tanlang:\n"
-        "Savol turini tanlaganingizdan keyin xabaringizni yuboring."
+        "Muammoingizga mos bo'limni tanlang:\n\n"
+        "1️⃣ Metodik ishimni kiritdim, tasdiqlash tugmasi bosilmayapti\n"
+        "2️⃣ Antiplagiatdan ro'yxatdan o'tganman, parol yoki login xato deyapti\n"
+        "3️⃣ Saytga login/parolimni kiritdim, boshqa qurilmadan kirilgan deb chiqyapti\n\n"
+        "Quyidagi tugmalardan birini bosing 👇"
     )
 
 
