@@ -10,60 +10,71 @@ from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, ReactionTypeEmoji
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    CallbackQuery,
+    ReactionTypeEmoji,
+)
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 DB_PATH = BASE_DIR / "bridge.db"
-BOT_TOKEN = "8653818904:AAG-6_uQ6LWfmzdF12eyhjPc1Hs5yQ2bhWc"
-TARGET_GROUP_ID_RAW = -5175116078
-ALLOWED_USER_IDS_RAW = "1350513135,1028767008,957193784,289481835,8121528248,5234139857,1593248495,234263477,645374276,6907422453,873841187,306252616,1682186529,5387383071,35855187,1028274877,423010142,90422447"
+
+BOT_TOKEN = "8692288654:AAGQgjLeZyVveHjt0ysyjtnYwquSyK1L8uY"
+TARGET_GROUP_ID_RAW = "-1003312509381"
+ADMIN_USER_IDS_RAW = "1350513135"
+
 CLAIM_REACTION = "👍"
 DONE_REACTION = "👍"
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN topilmadi. .env faylga BOT_TOKEN kiriting.")
 
+if not TARGET_GROUP_ID_RAW:
+    raise RuntimeError("TARGET_GROUP_ID topilmadi. .env faylga TARGET_GROUP_ID kiriting.")
+
 try:
     TARGET_GROUP_ID = int(TARGET_GROUP_ID_RAW)
 except ValueError as exc:
     raise RuntimeError("TARGET_GROUP_ID noto'g'ri. U son bo'lishi kerak.") from exc
 
-if not TARGET_GROUP_ID:
-    raise RuntimeError("TARGET_GROUP_ID topilmadi.")
 
+def parse_admin_ids(raw_value: str) -> set[int]:
+    admin_ids: set[int] = set()
+    if not raw_value.strip():
+        return admin_ids
 
-def parse_allowed_user_ids(raw_value: str) -> set[int]:
-    allowed_ids: set[int] = set()
     for item in raw_value.split(","):
         item = item.strip()
         if not item:
             continue
         try:
-            allowed_ids.add(int(item))
+            admin_ids.add(int(item))
         except ValueError as exc:
             raise RuntimeError(
-                "ALLOWED_USER_IDS noto'g'ri. Masalan: 123456789,987654321"
+                "ADMIN_USER_IDS noto'g'ri. Masalan: 123456789,987654321"
             ) from exc
-    return allowed_ids
+    return admin_ids
 
 
-ALLOWED_USER_IDS = parse_allowed_user_ids(ALLOWED_USER_IDS_RAW)
-
-if not ALLOWED_USER_IDS:
-    raise RuntimeError("ALLOWED_USER_IDS topilmadi.")
+ADMIN_USER_IDS = parse_admin_ids(ADMIN_USER_IDS_RAW)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-logger = logging.getLogger("telegram-bridge-bot")
+logger = logging.getLogger("telegram-support-bot")
 
 router = Router(name="main")
 
 
+# =========================
+# DATABASE
+# =========================
 def init_db() -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -76,6 +87,7 @@ def init_db() -> None:
                 user_message_id INTEGER,
                 username TEXT,
                 full_name TEXT,
+                question_type TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (group_chat_id, group_message_id)
             )
@@ -101,6 +113,7 @@ def init_db() -> None:
                 user_chat_id INTEGER PRIMARY KEY,
                 group_chat_id INTEGER NOT NULL,
                 ticket_message_id INTEGER NOT NULL,
+                question_type TEXT,
                 status TEXT NOT NULL DEFAULT 'open',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -120,9 +133,62 @@ def init_db() -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_states (
+                user_chat_id INTEGER PRIMARY KEY,
+                selected_question TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
         conn.commit()
 
 
+# =========================
+# USER STATE
+# =========================
+def set_user_selected_question(user_chat_id: int, question: str) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO user_states (user_chat_id, selected_question, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_chat_id) DO UPDATE SET
+                selected_question = excluded.selected_question,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_chat_id, question),
+        )
+        conn.commit()
+
+
+def get_user_selected_question(user_chat_id: int) -> Optional[str]:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        row = conn.execute(
+            """
+            SELECT selected_question
+            FROM user_states
+            WHERE user_chat_id = ?
+            """,
+            (user_chat_id,),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def clear_user_selected_question(user_chat_id: int) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "DELETE FROM user_states WHERE user_chat_id = ?",
+            (user_chat_id,),
+        )
+        conn.commit()
+
+
+# =========================
+# TICKETS
+# =========================
 def save_link(
     group_chat_id: int,
     group_message_id: int,
@@ -131,6 +197,7 @@ def save_link(
     user_message_id: Optional[int],
     username: Optional[str],
     full_name: str,
+    question_type: Optional[str],
 ) -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -142,8 +209,9 @@ def save_link(
                 user_chat_id,
                 user_message_id,
                 username,
-                full_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                full_name,
+                question_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 group_chat_id,
@@ -153,6 +221,7 @@ def save_link(
                 user_message_id,
                 username,
                 full_name,
+                question_type,
             ),
         )
         conn.commit()
@@ -163,7 +232,7 @@ def get_user_by_group_message(group_chat_id: int, group_message_id: int) -> Opti
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """
-            SELECT ticket_message_id, user_chat_id, user_message_id, username, full_name
+            SELECT ticket_message_id, user_chat_id, user_message_id, username, full_name, question_type
             FROM message_links
             WHERE group_chat_id = ? AND group_message_id = ?
             """,
@@ -227,7 +296,7 @@ def get_open_ticket_for_user(user_chat_id: int) -> Optional[dict]:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """
-            SELECT user_chat_id, group_chat_id, ticket_message_id, status, created_at, updated_at
+            SELECT user_chat_id, group_chat_id, ticket_message_id, question_type, status, created_at, updated_at
             FROM user_open_tickets
             WHERE user_chat_id = ? AND status = 'open'
             """,
@@ -236,21 +305,27 @@ def get_open_ticket_for_user(user_chat_id: int) -> Optional[dict]:
         return dict(row) if row else None
 
 
-def open_or_update_user_ticket(user_chat_id: int, group_chat_id: int, ticket_message_id: int) -> None:
+def open_or_update_user_ticket(
+    user_chat_id: int,
+    group_chat_id: int,
+    ticket_message_id: int,
+    question_type: Optional[str],
+) -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
             INSERT INTO user_open_tickets (
-                user_chat_id, group_chat_id, ticket_message_id, status, updated_at
+                user_chat_id, group_chat_id, ticket_message_id, question_type, status, updated_at
             )
-            VALUES (?, ?, ?, 'open', CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, 'open', CURRENT_TIMESTAMP)
             ON CONFLICT(user_chat_id) DO UPDATE SET
                 group_chat_id = excluded.group_chat_id,
                 ticket_message_id = excluded.ticket_message_id,
+                question_type = excluded.question_type,
                 status = 'open',
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (user_chat_id, group_chat_id, ticket_message_id),
+            (user_chat_id, group_chat_id, ticket_message_id, question_type),
         )
         conn.commit()
 
@@ -309,81 +384,114 @@ def append_text_to_ticket(existing_text: str, message: Message) -> str:
     return (
         existing_text
         + "\n\n"
-        + f"📨 <b>Qo'shimcha xabar ({msg_time})</b>\n"
-        + f"<b>{added_text}</b>"
+        + f"📨 <b>Qo‘shimcha xabar ({msg_time})</b>\n"
+        + f"{added_text}"
     )
 
 
-def get_last_unanswered_message(group_chat_id: int) -> Optional[dict]:
+def get_open_tickets(limit: int = 20) -> list[dict]:
     with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
+        rows = conn.execute(
             """
             SELECT
-                uot.ticket_message_id AS group_message_id,
+                uot.user_chat_id,
                 uot.ticket_message_id,
+                uot.question_type,
+                uot.updated_at,
                 ml.full_name,
-                ml.username,
-                ml.user_chat_id,
-                uot.updated_at
+                ml.username
             FROM user_open_tickets uot
-            JOIN message_links ml
+            LEFT JOIN message_links ml
               ON ml.group_chat_id = uot.group_chat_id
              AND ml.group_message_id = uot.ticket_message_id
-            LEFT JOIN ticket_claims tc
-              ON tc.group_chat_id = uot.group_chat_id
-             AND tc.ticket_message_id = uot.ticket_message_id
-            WHERE uot.group_chat_id = ?
-              AND uot.status = 'open'
-              AND tc.ticket_message_id IS NULL
-            ORDER BY uot.updated_at DESC, uot.ticket_message_id DESC
-            LIMIT 1
+            WHERE uot.status = 'open'
+            ORDER BY uot.updated_at DESC
+            LIMIT ?
             """,
-            (group_chat_id,),
-        ).fetchone()
-        return dict(row) if row else None
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
-def is_user_allowed(message: Message) -> bool:
-    return bool(message.from_user and message.from_user.id in ALLOWED_USER_IDS)
+# =========================
+# HELPERS
+# =========================
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_USER_IDS
 
 
 def is_allowed_user_content(message: Message) -> bool:
     return bool(message.text or message.voice or message.document)
 
 
-def build_sender_card(message: Message) -> str:
+def start_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="1-savol", callback_data="question:1-savol"),
+                InlineKeyboardButton(text="2-savol", callback_data="question:2-savol"),
+            ],
+            [
+                InlineKeyboardButton(text="Savollar", callback_data="show_questions")
+            ],
+        ]
+    )
+
+
+def question_menu_text() -> str:
+    return (
+        "Assalomu alaykum! 👋\n\n"
+        "Quyidagi bo‘limlardan birini tanlang.\n"
+        "Savol turini tanlaganingizdan keyin xabaringizni yuboring."
+    )
+
+
+def build_sender_card(message: Message, question_type: Optional[str]) -> str:
     user = message.from_user
     full_name = user.full_name if user else "Noma'lum foydalanuvchi"
     user_id = user.id if user else 0
     username = f"@{user.username}" if user and user.username else "yo'q"
+    q_type = question_type or "Tanlanmagan"
+
     return (
         "📩 <b>Yangi murojaat</b>\n"
+        f"🗂 <b>Bo‘lim:</b> {q_type}\n"
         f"👤 <b>F.I.Sh.:</b> {full_name}\n"
         f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
         f"🔗 <b>Username:</b> {username}\n\n"
-        "Quyidagi xabarga <b>reply</b> qilib javob bering. "
-        "Birinchi bo'lib javob yozgan operator murojaatni band qiladi."
+        "Quyidagi xabarga <b>reply</b> qilib javob bering."
     )
 
 
-def build_full_text_message(message: Message) -> str:
+def build_full_text_message(message: Message, question_type: Optional[str]) -> str:
     user = message.from_user
     full_name = user.full_name if user else "Noma'lum foydalanuvchi"
     user_id = user.id if user else 0
     username = f"@{user.username}" if user and user.username else "yo'q"
     user_text = (message.text or "").strip()
+    q_type = question_type or "Tanlanmagan"
 
     return (
         "📩 <b>Yangi murojaat</b>\n"
+        f"🗂 <b>Bo‘lim:</b> {q_type}\n"
         f"👤 <b>F.I.Sh.:</b> {full_name}\n"
         f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
         f"🔗 <b>Username:</b> {username}\n\n"
         f"💬 <b>Xabar:</b>\n{user_text}\n\n"
-        "Quyidagi xabarga <b>reply</b> qilib javob bering. "
-        "Birinchi bo'lib javob yozgan operator murojaatni band qiladi."
+        "Quyidagi xabarga <b>reply</b> qilib javob bering."
     )
 
+def build_group_message_link(group_chat_id: int, message_id: int) -> str:
+    chat_id_str = str(group_chat_id)
+
+    if not chat_id_str.startswith("-100"):
+        raise ValueError(
+            "Ticket link faqat supergroup uchun ishlaydi. TARGET_GROUP_ID -100 bilan boshlanishi kerak."
+        )
+
+    internal_chat_id = chat_id_str[4:]  # "-100" ni olib tashlaymiz
+    return f"https://t.me/c/{internal_chat_id}/{message_id}"
 
 async def safe_set_reaction(bot: Bot, chat_id: int, message_id: int, emoji: str) -> None:
     try:
@@ -407,28 +515,52 @@ async def mark_ticket(bot: Bot, chat_id: int, ticket_message_id: int, emoji: str
         await safe_set_reaction(bot, chat_id, message_id, emoji)
 
 
+# =========================
+# USER FLOW
+# =========================
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    if not is_user_allowed(message):
-        await message.answer("⛔ Sizda ushbu botdan foydalanish huquqi yo'q.")
-        return
-
     await message.answer(
-        "Assalomu alaykum.\n\n"
-        "Quyidagi formatlargina qabul qilinadi:\n"
-        "• text xabar\n"
-        "• ovozli xabar\n"
-        "• fayl\n\n"
-        "Agar sizga hali javob berilmagan bo'lsa, keyingi text xabarlaringiz shu murojaatga qo'shib boriladi."
+        question_menu_text(),
+        reply_markup=start_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "show_questions")
+async def show_questions(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        question_menu_text(),
+        reply_markup=start_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("question:"))
+async def choose_question(callback: CallbackQuery) -> None:
+    question_type = callback.data.split(":", 1)[1]
+    user_chat_id = callback.from_user.id
+
+    set_user_selected_question(user_chat_id, question_type)
+
+    await callback.message.edit_text(
+        f"✅ Siz <b>{question_type}</b> ni tanladingiz.\n\n"
+        "Endi savolingizni yozing yoki ovoz/fayl yuboring.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=start_keyboard(),
+    )
+    await callback.answer("Savol turi tanlandi")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, Command("menu"))
+async def cmd_menu(message: Message) -> None:
+    await message.answer(
+        question_menu_text(),
+        reply_markup=start_keyboard(),
     )
 
 
 @router.message(F.chat.type == ChatType.PRIVATE)
 async def from_user_to_group(message: Message, bot: Bot) -> None:
-    if not is_user_allowed(message):
-        await message.answer("⛔ Sizda ushbu botdan foydalanish huquqi yo'q.")
-        return
-
     if not is_allowed_user_content(message):
         await message.answer(
             "❌ Faqat quyidagilar yuborish mumkin:\n"
@@ -443,18 +575,26 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
         username = message.from_user.username if message.from_user else None
         user_chat_id = message.chat.id
 
+        selected_question = get_user_selected_question(user_chat_id)
         open_ticket = get_open_ticket_for_user(user_chat_id)
 
-        # Ochiq ticket bo'lsa
+        if not selected_question and not open_ticket:
+            await message.answer(
+                "Avval savol turini tanlang 👇",
+                reply_markup=start_keyboard(),
+            )
+            return
+
+        # Ochiq ticket mavjud bo'lsa, shu ticketga qo'shamiz
         if open_ticket:
             ticket_message_id = open_ticket["ticket_message_id"]
+            question_type = open_ticket.get("question_type") or selected_question
 
-            # TEXT bo'lsa — ticket matnini edit qilamiz
             if message.text:
                 current_text = get_ticket_text(TARGET_GROUP_ID, ticket_message_id)
 
                 if not current_text:
-                    current_text = build_sender_card(message)
+                    current_text = build_sender_card(message, question_type)
 
                 updated_text = append_text_to_ticket(current_text, message)
 
@@ -475,12 +615,12 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
                     user_chat_id=user_chat_id,
                     group_chat_id=TARGET_GROUP_ID,
                     ticket_message_id=ticket_message_id,
+                    question_type=question_type,
                 )
 
-                await message.answer("✅ Xabaringiz avvalgi murojaatga qo'shildi.")
+                await message.answer("✅ Xabaringiz avvalgi murojaatga qo‘shildi.")
                 return
 
-            # VOICE yoki DOCUMENT bo'lsa — reply bo'lib tushadi
             if message.voice or message.document:
                 group_msg = await bot.copy_message(
                     chat_id=TARGET_GROUP_ID,
@@ -497,20 +637,24 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
                     user_message_id=message.message_id,
                     username=username,
                     full_name=full_name,
+                    question_type=question_type,
                 )
 
                 open_or_update_user_ticket(
                     user_chat_id=user_chat_id,
                     group_chat_id=TARGET_GROUP_ID,
                     ticket_message_id=ticket_message_id,
+                    question_type=question_type,
                 )
 
-                await message.answer("✅ Xabaringiz avvalgi murojaatga qo'shib yuborildi.")
+                await message.answer("✅ Xabaringiz avvalgi murojaatga qo‘shib yuborildi.")
                 return
 
         # Yangi ticket ochish
+        question_type = selected_question
+
         if message.text:
-            initial_text = build_full_text_message(message)
+            initial_text = build_full_text_message(message, question_type)
 
             group_msg = await bot.send_message(
                 chat_id=TARGET_GROUP_ID,
@@ -526,6 +670,7 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
                 user_message_id=message.message_id,
                 username=username,
                 full_name=full_name,
+                question_type=question_type,
             )
 
             save_ticket_text(
@@ -538,10 +683,11 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
                 user_chat_id=user_chat_id,
                 group_chat_id=TARGET_GROUP_ID,
                 ticket_message_id=group_msg.message_id,
+                question_type=question_type,
             )
 
         elif message.voice or message.document:
-            initial_text = build_sender_card(message)
+            initial_text = build_sender_card(message, question_type)
 
             sender_card = await bot.send_message(
                 chat_id=TARGET_GROUP_ID,
@@ -557,6 +703,7 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
                 user_message_id=message.message_id,
                 username=username,
                 full_name=full_name,
+                question_type=question_type,
             )
 
             save_ticket_text(
@@ -580,74 +727,99 @@ async def from_user_to_group(message: Message, bot: Bot) -> None:
                 user_message_id=message.message_id,
                 username=username,
                 full_name=full_name,
+                question_type=question_type,
             )
 
             open_or_update_user_ticket(
                 user_chat_id=user_chat_id,
                 group_chat_id=TARGET_GROUP_ID,
                 ticket_message_id=sender_card.message_id,
+                question_type=question_type,
             )
 
+        clear_user_selected_question(user_chat_id)
+
         await message.answer(
-            "✅ Murojaatingiz qabul qilindi. Javob tayyor bo'lgach shu bot orqali sizga yuboriladi."
+            "✅ Murojaatingiz qabul qilindi.\n"
+            "Javob tayyor bo‘lgach shu bot orqali sizga yuboriladi.",
+            reply_markup=start_keyboard(),
         )
 
     except Exception as exc:
         logger.exception("Foydalanuvchi xabarini guruhga yuborishda xatolik: %s", exc)
         await message.answer(
-            "❌ Xabarni guruhga yuborishda xatolik yuz berdi. Guruh ID va bot huquqlarini tekshiring."
+            "❌ Xabarni guruhga yuborishda xatolik yuz berdi. "
+            "Guruh ID va bot huquqlarini tekshiring."
         )
 
 
-@router.message(F.chat.id == TARGET_GROUP_ID, Command("last"))
-async def cmd_last_unanswered(message: Message, bot: Bot) -> None:
-    last_msg = get_last_unanswered_message(message.chat.id)
-
-    if not last_msg:
-        await message.reply("✅ Javob berilmagan xabar topilmadi.")
+# =========================
+# ADMIN FLOW
+# =========================
+@router.message(Command("tickets"))
+async def cmd_tickets(message: Message) -> None:
+    user = message.from_user
+    if not user or not is_admin(user.id):
+        await message.answer("⛔ Siz admin emassiz.")
         return
 
-    target_message_id = last_msg["group_message_id"]
-    ticket_message_id = last_msg["ticket_message_id"]
-    full_name = last_msg.get("full_name") or "Noma'lum foydalanuvchi"
-    username = last_msg.get("username")
-    user_chat_id = last_msg["user_chat_id"]
-    username_text = f"@{username}" if username else "yo'q"
+    tickets = get_open_tickets(limit=20)
 
-    try:
-        service_msg = await bot.send_message(
-            chat_id=message.chat.id,
-            text=(
-                "📌 <b>Oxirgi javob berilmagan murojaat</b>\n"
-                f"👤 <b>F.I.Sh.:</b> {full_name}\n"
-                f"🔗 <b>Username:</b> {username_text}\n\n"
-                "Shu thread ichida <b>reply</b> qilib javob bering."
-            ),
-            parse_mode=ParseMode.HTML,
-            reply_to_message_id=target_message_id,
+    if not tickets:
+        await message.answer("✅ Hozircha ochiq murojaatlar yo‘q.")
+        return
+
+    lines = ["📋 <b>Ochiq murojaatlar ro‘yxati</b>\n"]
+    keyboard_rows = []
+
+    for idx, ticket in enumerate(tickets, start=1):
+        full_name = ticket.get("full_name") or "Noma'lum foydalanuvchi"
+        username = ticket.get("username")
+        username_text = f"@{username}" if username else "yo'q"
+        q_type = ticket.get("question_type") or "Tanlanmagan"
+        ticket_id = ticket["ticket_message_id"]
+        user_chat_id = ticket["user_chat_id"]
+
+        lines.append(
+            f"{idx}. <b>Ticket ID:</b> <code>{ticket_id}</code>\n"
+            f"👤 {full_name}\n"
+            f"🔗 {username_text}\n"
+            f"🆔 User: <code>{user_chat_id}</code>\n"
+            f"🗂 Bo‘lim: {q_type}\n"
         )
 
-        # Shu xizmat xabariga ham reply qilinsa ishlashi uchun bazaga bog'laymiz
-        save_link(
-            group_chat_id=message.chat.id,
-            group_message_id=service_msg.message_id,
-            ticket_message_id=ticket_message_id,
-            user_chat_id=user_chat_id,
-            user_message_id=None,
-            username=username,
-            full_name=full_name,
+        try:
+            ticket_link = build_group_message_link(TARGET_GROUP_ID, ticket_id)
+            keyboard_rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"📂 Ticket #{ticket_id} ni ochish",
+                        url=ticket_link,
+                    )
+                ]
+            )
+        except Exception:
+            pass
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows) if keyboard_rows else None
+
+    extra_note = ""
+    if not keyboard_rows:
+        extra_note = (
+            "\n⚠️ Ticket link yaratib bo‘lmadi.\n"
+            "Buning uchun guruh supergroup bo‘lishi va ID -100 bilan boshlanishi kerak."
         )
 
-    except Exception as exc:
-        logger.exception("Oxirgi javob berilmagan xabarga yo'naltirishda xatolik: %s", exc)
-        await message.reply("❌ Oxirgi javob berilmagan xabarga reply qilib bo'lmadi.")
+    await message.answer(
+        "\n".join(lines) + extra_note,
+        parse_mode="HTML",
+        reply_markup=keyboard,
+        disable_web_page_preview=True,
+    )
 
 
 @router.message(F.chat.id == TARGET_GROUP_ID, F.reply_to_message.as_("reply_to"))
 async def from_group_to_user(message: Message, bot: Bot, reply_to: Message) -> None:
-    if message.text and message.text.strip().lower() == "/last":
-        return
-
     link = get_user_by_group_message(message.chat.id, reply_to.message_id)
     if not link:
         await message.reply("❌ Bu reply qaysi foydalanuvchiga tegishli ekanini topa olmadim.")
@@ -656,6 +828,10 @@ async def from_group_to_user(message: Message, bot: Bot, reply_to: Message) -> N
     admin = message.from_user
     if not admin:
         await message.reply("❌ Operator ma'lumotini aniqlab bo'lmadi.")
+        return
+
+    if ADMIN_USER_IDS and admin.id not in ADMIN_USER_IDS:
+        await message.reply("⛔ Siz admin ro‘yxatida yo‘qsiz.")
         return
 
     ticket_message_id = link["ticket_message_id"]
@@ -673,8 +849,8 @@ async def from_group_to_user(message: Message, bot: Bot, reply_to: Message) -> N
 
     if existing_claim and existing_claim["admin_user_id"] != admin.id:
         await message.reply(
-            "⛔ Bu murojaat allaqachon boshqa operator tomonidan olindi. "
-            f"Band qilgan operator: {existing_claim['admin_full_name']}"
+            "⛔ Bu murojaat allaqachon boshqa admin tomonidan olindi. "
+            f"Band qilgan admin: {existing_claim['admin_full_name']}"
         )
         return
 
@@ -692,7 +868,7 @@ async def from_group_to_user(message: Message, bot: Bot, reply_to: Message) -> N
     except Exception as exc:
         logger.exception("Javobni foydalanuvchiga yuborishda xatolik: %s", exc)
         await message.reply(
-            "❌ Javobni yuborib bo'lmadi. Foydalanuvchi botni bloklagan bo'lishi mumkin."
+            "❌ Javobni yuborib bo‘lmadi. Foydalanuvchi botni bloklagan bo‘lishi mumkin."
         )
 
 
@@ -701,6 +877,9 @@ async def ignore_non_replies(message: Message) -> None:
     return
 
 
+# =========================
+# MAIN
+# =========================
 async def main() -> None:
     init_db()
 
@@ -717,11 +896,10 @@ async def main() -> None:
     me = await bot.get_me()
     logger.info("Bot ishga tushdi: @%s", me.username)
     logger.info("Target group id: %s", TARGET_GROUP_ID)
-    logger.info("Allowed user ids count: %s", len(ALLOWED_USER_IDS))
+    logger.info("Admin IDs count: %s", len(ADMIN_USER_IDS))
 
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
-#taskkill /F /IM python.exe
 
 if __name__ == "__main__":
     try:
