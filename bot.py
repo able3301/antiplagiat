@@ -429,8 +429,8 @@ def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="1-savol", callback_data="question:1-savol"),
-                InlineKeyboardButton(text="2-savol", callback_data="question:2-savol"),
+                InlineKeyboardButton(text="1-savol: Metodik ishimni kiritdim tasdiqlash tugmasi bosilmayapti", callback_data="question:1-savol"),
+                InlineKeyboardButton(text="2-savol: Antiplagiatdan ro’yxatdan o’tganman parol yoki login xató deyapti", callback_data="question:2-savol"),
             ],
             [
                 InlineKeyboardButton(text="Savollar", callback_data="show_questions")
